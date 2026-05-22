@@ -16,6 +16,7 @@ Configuration via env:
 """
 from __future__ import annotations
 
+import json
 import logging
 import os
 import time
@@ -85,6 +86,46 @@ def _get(path: str) -> dict:
         return r.json()
     except Exception as e:
         return {"error": f"could not parse JSON from GET {path}: {e}"}
+
+
+def _read_sse_messages(path: str, *, timeout: Optional[float] = None) -> str:
+    """Consume an SSE stream at `<base>/<path>` and return the concatenated
+    'message' fields. WrenAI's /streaming endpoints emit chunks shaped:
+
+        data: {"message": "<partial text>"}\\n\\n
+
+    so a successful read returns the full natural-language string. Any
+    non-data lines or JSON parse failures are silently skipped — partial
+    payloads still yield whatever text was streamed before the error.
+    """
+    cfg = _cfg()
+    url = f"{cfg['base']}{path}"
+    parts: List[str] = []
+    try:
+        with httpx.stream("GET", url, timeout=timeout or cfg["timeout"]) as r:
+            if r.status_code != 200:
+                return ""
+            buffer = ""
+            for chunk in r.iter_text():
+                buffer += chunk
+                # Process complete SSE events (\n\n separated)
+                while "\n\n" in buffer:
+                    event, buffer = buffer.split("\n\n", 1)
+                    for line in event.split("\n"):
+                        line = line.strip()
+                        if not line.startswith("data:"):
+                            continue
+                        body = line[5:].strip()
+                        try:
+                            d = json.loads(body)
+                        except Exception:
+                            continue
+                        msg = d.get("message")
+                        if isinstance(msg, str):
+                            parts.append(msg)
+    except Exception as e:
+        logger.info(f"[wrenai] stream read on {path} ended early: {e}")
+    return "".join(parts)
 
 
 def _poll(result_path: str, *, expect_id_key: str = "query_id",
@@ -180,6 +221,10 @@ def sql_answer_full(query: str, sql: str, sql_data: dict,
         return {"error": f"sql_answer kickoff returned no query_id: {started}"}
     final = _poll(f"/v1/sql-answers/{qid}", job_id=qid)
     final.setdefault("query_id", qid)
+    # The status endpoint only reports state; the actual natural-language
+    # answer streams from /streaming. Collect it once status is terminal.
+    if final.get("status") == "succeeded" and not final.get("answer"):
+        final["answer"] = _read_sse_messages(f"/v1/sql-answers/{qid}/streaming")
     return final
 
 

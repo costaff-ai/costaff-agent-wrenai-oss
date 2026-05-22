@@ -464,52 +464,87 @@ def wrenai_add_instruction(
 
 
 def wrenai_health() -> dict:
-    """Probe WrenAI: HTTP /health + semantic-prep status for the configured MDL.
+    """Probe WrenAI: HTTP /health + a real smoke ask against the configured MDL.
 
     Returns:
         {
           "wren_ai_service": "ok" | error string,
           "mdl_hash": "<hash from env>",
-          "semantics_status": "finished" | "in-progress" | "failed" | "missing",
+          "semantics_status": "finished" | "in-progress" | "failed" |
+                              "unknown_but_ask_works" | "missing",
+          "ask_smoke_test": "passed" | "failed: ..." | "skipped",
           "ready_for_ask": bool,
           "notes": str
         }
 
-    `ready_for_ask=True` means the agent can serve real ask requests.
-    `False` means either the AI service is down OR the MDL has not been
-    indexed into qdrant — in that case the user should redeploy the MDL
-    through wren-ui (which triggers /v1/semantics-preparations on the
-    AI service).
+    `ready_for_ask=True` is grounded on **the real ask path working**,
+    not on `/v1/semantics-preparations` alone — that endpoint returns
+    `status=failed, error="<id> is not found"` for MDLs prepped through
+    other paths (e.g. wren-ui direct deploy) even when ask works fine,
+    which caused false-positive "MDL broken" reports 2026-05-22.
     """
     out: Dict[str, Any] = {
         "wren_ai_service": None,
         "mdl_hash": os.getenv("WRENAI_MDL_HASH", ""),
         "semantics_status": None,
+        "ask_smoke_test": "skipped",
         "ready_for_ask": False,
         "notes": "",
     }
     h = wai.health()
     out["wren_ai_service"] = h.get("status") or h.get("error") or "unknown"
+
     s = wai.semantics_status()
-    # Distinguish our _get() transport error (added when status_code != 200)
-    # from WrenAI's own "error" field on the status payload (always present,
-    # null when prep succeeded). A WrenAI response always has "status";
-    # transport failures don't.
     if "status" not in s:
         msg = str(s.get("error") or "unknown transport failure")
         out["semantics_status"] = "missing" if "404" in msg else f"error: {msg}"
     else:
-        out["semantics_status"] = s.get("status") or "unknown"
+        prep_status = s.get("status") or "unknown"
+        prep_err_msg = ""
+        if isinstance(s.get("error"), dict):
+            prep_err_msg = str(s["error"].get("message") or "")
+        # `status=failed` with "is not found" message = prep record absent on
+        # AI service's tracker, but the MDL itself may still be indexed via
+        # wren-ui's deploy path. Don't trust this status alone.
+        if prep_status == "failed" and "not found" in prep_err_msg.lower():
+            out["semantics_status"] = "unknown_but_likely_ok"
+        else:
+            out["semantics_status"] = prep_status
+
+    # Real ground truth: try a single tiny ask. If it returns TEXT_TO_SQL,
+    # the MDL is queryable regardless of what the prep-status tracker says.
+    if out["wren_ai_service"] == "ok":
+        try:
+            ping = wai.ask_full("show one row")
+            if ping.get("status") == "finished" and ping.get("type") == "TEXT_TO_SQL":
+                out["ask_smoke_test"] = "passed"
+                if out["semantics_status"] != "finished":
+                    out["semantics_status"] = "unknown_but_ask_works"
+            else:
+                out["ask_smoke_test"] = (
+                    f"failed: status={ping.get('status')} type={ping.get('type')}"
+                )
+        except Exception as e:
+            out["ask_smoke_test"] = f"failed: {type(e).__name__}: {e}"
+
     out["ready_for_ask"] = (
         out["wren_ai_service"] == "ok"
-        and out["semantics_status"] == "finished"
+        and out["ask_smoke_test"] == "passed"
     )
     if not out["ready_for_ask"]:
-        out["notes"] = (
-            "MDL not indexed for this hash. Re-deploy the MDL via wren-ui, "
-            "or call /v1/semantics-preparations directly with the manifest. "
-            "Ask requests will return type=GENERAL until prep is finished."
-        )
+        if out["wren_ai_service"] != "ok":
+            out["notes"] = (
+                "wren-ai-service /health is not 'ok'. The service is down or "
+                "unreachable from this container."
+            )
+        else:
+            out["notes"] = (
+                "AI service responds but a smoke-ask did not return TEXT_TO_SQL. "
+                "Either the MDL is not indexed for this hash, or the question "
+                "was too vague — try wrenai_ask directly with a specific question "
+                "and inspect the returned `type` / `intent_reasoning`. If type "
+                "is consistently GENERAL, re-deploy the MDL via wren-ui."
+            )
     return out
 
 

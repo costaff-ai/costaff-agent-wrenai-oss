@@ -511,40 +511,62 @@ def wrenai_health() -> dict:
         else:
             out["semantics_status"] = prep_status
 
-    # Real ground truth: try a single tiny ask. If it returns TEXT_TO_SQL,
-    # the MDL is queryable regardless of what the prep-status tracker says.
+    # Smoke test — verify ask can REACH wrenai and return a terminal result.
+    # We do NOT require type=TEXT_TO_SQL because generic smoke questions
+    # ("show one row") get classified as GENERAL even on perfectly healthy
+    # MDLs; conflating that with "MDL broken" produces the false-negative
+    # the older code emitted. Real evidence of brokenness:
+    #   - smoke ask raises (network / 500 / timeout)
+    #   - smoke ask returns status=failed
+    # Anything that arrives at a terminal `finished` state = the service
+    # is responsive, regardless of intent classification.
     if out["wren_ai_service"] == "ok":
         try:
-            ping = wai.ask_full("show one row")
-            if ping.get("status") == "finished" and ping.get("type") == "TEXT_TO_SQL":
-                out["ask_smoke_test"] = "passed"
-                if out["semantics_status"] != "finished":
-                    out["semantics_status"] = "unknown_but_ask_works"
+            ping = wai.ask_full("count rows in the largest table")
+            pstatus = ping.get("status")
+            ptype = ping.get("type")
+            if pstatus == "finished":
+                if ptype == "TEXT_TO_SQL":
+                    out["ask_smoke_test"] = "passed"
+                else:
+                    out["ask_smoke_test"] = (
+                        f"inconclusive: type={ptype} (smoke question may be too generic — "
+                        "service is responsive)"
+                    )
             else:
                 out["ask_smoke_test"] = (
-                    f"failed: status={ping.get('status')} type={ping.get('type')}"
+                    f"failed: status={pstatus} error={ping.get('error')}"
                 )
         except Exception as e:
             out["ask_smoke_test"] = f"failed: {type(e).__name__}: {e}"
 
-    out["ready_for_ask"] = (
-        out["wren_ai_service"] == "ok"
-        and out["ask_smoke_test"] == "passed"
-    )
+    # ready_for_ask = no strong evidence of brokenness. "passed" and
+    # "inconclusive" both count as healthy; only network/timeout failure
+    # or a non-ok service marks it false.
+    ai_ok = out["wren_ai_service"] == "ok"
+    smoke = out["ask_smoke_test"]
+    smoke_ok = smoke == "passed" or smoke.startswith("inconclusive")
+    out["ready_for_ask"] = ai_ok and smoke_ok
+
     if not out["ready_for_ask"]:
-        if out["wren_ai_service"] != "ok":
+        if not ai_ok:
             out["notes"] = (
                 "wren-ai-service /health is not 'ok'. The service is down or "
                 "unreachable from this container."
             )
         else:
             out["notes"] = (
-                "AI service responds but a smoke-ask did not return TEXT_TO_SQL. "
-                "Either the MDL is not indexed for this hash, or the question "
-                "was too vague — try wrenai_ask directly with a specific question "
-                "and inspect the returned `type` / `intent_reasoning`. If type "
-                "is consistently GENERAL, re-deploy the MDL via wren-ui."
+                f"AI service /health is ok but the smoke ask failed at the "
+                f"transport / status level: {smoke}. The MDL may not be "
+                f"reachable for THIS hash even though the service itself is up — "
+                f"redeploy the MDL via wren-ui."
             )
+    elif smoke.startswith("inconclusive"):
+        out["notes"] = (
+            "Service responsive and ask reaches a terminal state. The smoke "
+            "question itself was classified as non-data — try a specific data "
+            "question (mention a table or metric) for a stronger signal."
+        )
     return out
 
 

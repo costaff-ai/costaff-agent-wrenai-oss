@@ -15,6 +15,7 @@ import os
 from typing import Any, Dict, List, Optional
 
 from . import _wrenai as wai
+from . import _wrenui as wui
 
 logger = logging.getLogger(__name__)
 
@@ -150,6 +151,126 @@ def wrenai_make_chart(
         return {"error": f"{type(e).__name__}: {e}"}
 
 
+# ---------------------------------------------------------- execute + one-shot
+
+
+def wrenai_execute_sql(sql: str, limit: Optional[int] = None) -> dict:
+    """Execute SQL via wren-ui's previewSql GraphQL mutation.
+
+    This runs the SQL through wren-engine against the project's
+    underlying data source (DuckDB in the sample / your configured
+    warehouse otherwise) and returns the rows directly. Use this
+    AFTER `wrenai_ask` produced a SQL string, when the caller wants
+    rows back without involving a separate database agent.
+
+    Args:
+        sql: The SQL to execute. Should be from `wrenai_ask` — do not
+            hand-craft SQL; let WrenAI produce it.
+        limit: Optional row cap. Hard-capped by WRENAI_EXEC_ROW_LIMIT
+            (default 1000) to protect downstream LLM context.
+
+    Returns:
+        On success: {"columns": [{"name", "type"}], "rows": [[...]],
+                     "row_count": N, "truncated_at": int | None}
+        On failure: {"error": "..."}
+    """
+    try:
+        out = wui.preview_sql(sql, limit=limit)
+        return out
+    except Exception as e:
+        logger.warning(f"[wrenai] wrenai_execute_sql failed: {e}")
+        return {"error": f"{type(e).__name__}: {e}"}
+
+
+def wrenai_answer(question: str, with_chart: bool = False) -> dict:
+    """High-level one-shot: ask + execute + explain (+ optional chart).
+
+    The "human prompt" path — call this when the caller wants a final
+    natural-language answer to a data question without orchestrating
+    ask / execute / explain steps separately. Internally runs:
+
+      1. wrenai_ask(question)          -> SQL + reasoning
+      2. wrenai_execute_sql(sql)       -> rows via wren-ui
+      3. wrenai_explain_result(...)    -> natural-language answer
+      4. (optional) wrenai_make_chart  -> Vega-Lite spec
+
+    Args:
+        question: The user's natural-language question.
+        with_chart: If True, also build a Vega-Lite chart spec.
+
+    Returns:
+        {
+          "question": str,
+          "sql": str,
+          "retrieved_tables": [...],
+          "sql_generation_reasoning": str,
+          "row_count": int,
+          "columns": [...],
+          "rows": [[...]],         # capped by WRENAI_EXEC_ROW_LIMIT
+          "answer": str,           # natural-language answer
+          "chart": {...} | None,   # Vega-Lite if with_chart=True
+          "error": str | None,     # only set when a step failed
+        }
+    """
+    out: Dict[str, Any] = {"question": question}
+    # Step 1: ask
+    asked = wrenai_ask(question)
+    if asked.get("error") or asked.get("status") != "finished":
+        out["error"] = f"ask failed: {asked.get('error') or asked.get('status')}"
+        return out
+    if asked.get("type") != "TEXT_TO_SQL":
+        out["error"] = (
+            f"ask returned type={asked.get('type')!r} — likely the MDL is "
+            f"not indexed for this question. intent_reasoning="
+            f"{asked.get('intent_reasoning')}"
+        )
+        return out
+    candidates = asked.get("response") or []
+    if not candidates or not candidates[0].get("sql"):
+        out["error"] = "ask produced no SQL"
+        return out
+    sql = candidates[0]["sql"]
+    out["sql"] = sql
+    out["retrieved_tables"] = asked.get("retrieved_tables") or []
+    out["sql_generation_reasoning"] = asked.get("sql_generation_reasoning")
+
+    # Step 2: execute
+    executed = wui.preview_sql(sql)
+    if "error" in executed:
+        out["error"] = f"execute failed: {executed['error']}"
+        return out
+    out["columns"] = executed["columns"]
+    out["rows"] = executed["rows"]
+    out["row_count"] = executed["row_count"]
+
+    # Step 3: explain
+    sql_data = wui.to_sql_data(executed)
+    explained = wai.sql_answer_full(question, sql, sql_data)
+    if "error" in explained:
+        # Explain failed but we still have rows — return what we have.
+        out["answer"] = None
+        out["error"] = f"explain failed: {explained['error']}"
+    else:
+        out["answer"] = explained.get("answer")
+
+    # Step 4 (optional): chart
+    if with_chart:
+        charted = wai.chart_full(question, sql, sql_data)
+        if "error" in charted:
+            out["chart"] = None
+            # Don't overwrite a prior error from explain — append.
+            chart_err = f"chart failed: {charted['error']}"
+            out["error"] = (out.get("error") + "; " + chart_err) if out.get("error") else chart_err
+        else:
+            out["chart"] = {
+                "chart_type": charted.get("chart_type"),
+                "vega_lite_spec": charted.get("vega_lite_spec") or charted.get("chart_schema"),
+                "reasoning": charted.get("reasoning"),
+            }
+
+    return out
+
+
 # ---------------------------------------------------------- knowledge tools
 
 
@@ -263,7 +384,9 @@ def wrenai_health() -> dict:
 
 def load_wrenai_tools() -> list:
     return [
+        wrenai_answer,        # high-level one-shot — prefer this
         wrenai_ask,
+        wrenai_execute_sql,
         wrenai_explain_result,
         wrenai_make_chart,
         wrenai_add_sql_pair,

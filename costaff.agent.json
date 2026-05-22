@@ -2,19 +2,21 @@
   "protocol_version": "1.0",
   "name": "costaff-agent-wrenai",
   "version": "0.1.0",
-  "description": "[Specialty] Natural-language Business Intelligence over a self-hosted WrenAI GenBI deployment. [Capability] Translate plain-language data questions into SQL against a prepared MDL (semantic model); explain query results in natural language; generate Vega-Lite chart specs from result rows; accumulate few-shot SQL-pairs and instruction-style knowledge into WrenAI's qdrant index to improve future ask quality; check end-to-end health (HTTP + semantics-preparation status). [Constraint] Does NOT execute SQL — the agent returns SQL only; rows must come from the caller (database-agent or wren-ui). Bound to ONE mdl_hash + project_id pair per deployment (set at agent add time); switching schemas requires redeploy with new env. Typical ask < 30s but capped at WRENAI_ASK_TIMEOUT. Free WrenAI OSS only — no Cloud account needed. [Output] Generated SQL + reasoning + retrieved_tables list, natural-language answer for a (question, sql, rows) tuple, Vega-Lite chart spec for a (question, sql, rows) tuple, prep/health status report.",
+  "description": "[Specialty] End-to-end natural-language Business Intelligence over a self-hosted WrenAI GenBI deployment — single agent owns ask + execute + explain + chart. [Capability] One-shot `wrenai_answer(question)` runs ask → execute against the project's data source via wren-ui GraphQL → natural-language answer (+ optional Vega-Lite chart) in a single tool call; lower-level tools (`wrenai_ask`, `wrenai_execute_sql`, `wrenai_explain_result`, `wrenai_make_chart`) are also exposed for granular control. Accumulates few-shot SQL-pairs and domain instructions into WrenAI's qdrant index. Health probe reports HTTP + MDL prep status. [Constraint] Bound to ONE mdl_hash + project_id pair per deployment (set at agent add time); switching schemas requires redeploy. Execution row count is hard-capped by WRENAI_EXEC_ROW_LIMIT (default 1000) to protect downstream LLM context. Typical end-to-end answer < 60s. Free WrenAI OSS only — no Cloud account needed. [Output] For `wrenai_answer`: natural-language answer + the executed SQL + retrieved tables + rows. For granular tools: SQL only / rows only / explanation only / chart spec only.",
   "a2a_service": "agent-wrenai",
   "port": 8081,
   "env_required": [
     "GOOGLE_API_KEY",
     "WRENAI_BASE_URL",
+    "WRENAI_UI_GRAPHQL_URL",
     "WRENAI_PROJECT_ID",
     "WRENAI_MDL_HASH"
   ],
   "env_optional": [
     "WRENAI_TIMEOUT",
     "WRENAI_ASK_POLL_INTERVAL",
-    "WRENAI_ASK_POLL_TIMEOUT"
+    "WRENAI_ASK_POLL_TIMEOUT",
+    "WRENAI_EXEC_ROW_LIMIT"
   ],
   "env_shared": [
     "GOOGLE_API_KEY",

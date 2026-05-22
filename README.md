@@ -16,18 +16,21 @@
 
 | Tool | Purpose |
 |---|---|
-| `wrenai_ask(question)` | Translate a natural-language question to SQL + reasoning + retrieved tables, using the configured MDL. |
-| `wrenai_explain_result(question, sql, sql_data)` | Given a question, its SQL, and the executed rows, produce a natural-language answer. |
-| `wrenai_make_chart(question, sql, sql_data)` | Given the same inputs, produce a Vega-Lite v5 chart spec. |
+| **`wrenai_answer(question, with_chart?)`** | **One-shot end-to-end.** Runs ask → execute via wren-ui GraphQL → natural-language answer (+ optional chart). Prefer this for any "answer my data question" request. |
+| `wrenai_ask(question)` | SQL generation only (no execution). |
+| `wrenai_execute_sql(sql, limit?)` | Execute a SQL via wren-ui's `previewSql` and return rows. |
+| `wrenai_explain_result(question, sql, sql_data)` | Given a (question, sql, rows) triple, produce a natural-language answer. |
+| `wrenai_make_chart(question, sql, sql_data)` | Same triple → Vega-Lite v5 chart spec. |
 | `wrenai_add_sql_pair(question, sql)` | Store a verified (question, SQL) pair as a few-shot exemplar in WrenAI's qdrant index. |
 | `wrenai_add_instruction(text, questions, is_default)` | Add a domain rule to WrenAI's knowledge base. |
 | `wrenai_health()` | Probe `/health` + check `semantics-preparations` status for the configured MDL hash. |
 
 ## What it does NOT do (by design)
 
-- **Execute SQL.** The agent generates SQL only; the caller (typically `database-agent`) executes it and passes rows back for `wrenai_explain_result` / `wrenai_make_chart`. Separating generation from execution keeps each agent's responsibility clean and avoids embedding a DB driver here.
+- **Connect to arbitrary external databases.** SQL execution goes through wren-ui's `previewSql` against the project's configured MDL — for raw DBs outside WrenAI, use `database-agent`.
 - **Manage MDL prep.** The agent does NOT call `POST /v1/semantics-preparations` — the operator does that via wren-ui at deploy time. The agent only *checks* prep status via `wrenai_health`.
 - **Switch MDL at runtime.** One agent instance serves one schema. Deploy another instance with different env values to target a different MDL.
+- **Return unbounded result sets.** Rows are capped at `WRENAI_EXEC_ROW_LIMIT` (default 1000) to protect downstream LLM context.
 
 ---
 
@@ -94,12 +97,14 @@ Agent listens on `http://localhost:8081`. A2A discovery endpoint: `/.well-known/
 | Var | Required | Default | Notes |
 |---|---|---|---|
 | `GOOGLE_API_KEY` | yes (gemini) | — | LLM key for the orchestrator |
-| `WRENAI_BASE_URL` | yes | — | e.g. `http://10.128.0.2:5555` (internal IP) or `https://wren.example.com` |
+| `WRENAI_BASE_URL` | yes | — | wren-ai-service URL, e.g. `http://10.128.0.2:5555` |
+| `WRENAI_UI_GRAPHQL_URL` | yes | — | wren-ui GraphQL URL for SQL execution, e.g. `http://10.128.0.2:13000/api/graphql` |
 | `WRENAI_PROJECT_ID` | yes | — | Integer-as-string from wren-ui's `project` table, e.g. `"1"` |
 | `WRENAI_MDL_HASH` | yes | — | 40-char hex from wren-ui's `deploy_log.hash` |
 | `WRENAI_TIMEOUT` | no | `30` | HTTP timeout per call (seconds) |
 | `WRENAI_ASK_POLL_INTERVAL` | no | `2` | Poll cadence for async ask/answer/chart jobs |
 | `WRENAI_ASK_POLL_TIMEOUT` | no | `120` | Max total wait for an async job |
+| `WRENAI_EXEC_ROW_LIMIT` | no | `1000` | Hard cap on rows returned from `wrenai_execute_sql` |
 | `COSTAFF_AGENT_MODEL_PROVIDER` | no | `gemini` | `gemini` or `litellm` |
 | `WRENAI_AGENT_MODEL` | no | `gemini-3.1-flash-lite-preview` | LLM for the orchestrator (not WrenAI's own LLM) |
 

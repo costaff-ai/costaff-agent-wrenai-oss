@@ -1,0 +1,7 @@
+google-adk[a2a,extensions]==2.0.0
+google-cloud-storage
+mcp
+uvicorn
+python-dotenv
+litellm
+httpx

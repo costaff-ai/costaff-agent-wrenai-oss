@@ -1,0 +1,30 @@
+{
+  "protocol_version": "1.0",
+  "name": "costaff-agent-wrenai",
+  "version": "0.1.0",
+  "description": "[Specialty] Natural-language Business Intelligence over a self-hosted WrenAI GenBI deployment. [Capability] Translate plain-language data questions into SQL against a prepared MDL (semantic model); explain query results in natural language; generate Vega-Lite chart specs from result rows; accumulate few-shot SQL-pairs and instruction-style knowledge into WrenAI's qdrant index to improve future ask quality; check end-to-end health (HTTP + semantics-preparation status). [Constraint] Does NOT execute SQL — the agent returns SQL only; rows must come from the caller (database-agent or wren-ui). Bound to ONE mdl_hash + project_id pair per deployment (set at agent add time); switching schemas requires redeploy with new env. Typical ask < 30s but capped at WRENAI_ASK_TIMEOUT. Free WrenAI OSS only — no Cloud account needed. [Output] Generated SQL + reasoning + retrieved_tables list, natural-language answer for a (question, sql, rows) tuple, Vega-Lite chart spec for a (question, sql, rows) tuple, prep/health status report.",
+  "a2a_service": "agent-wrenai",
+  "port": 8081,
+  "env_required": [
+    "GOOGLE_API_KEY",
+    "WRENAI_BASE_URL",
+    "WRENAI_PROJECT_ID",
+    "WRENAI_MDL_HASH"
+  ],
+  "env_optional": [
+    "WRENAI_TIMEOUT",
+    "WRENAI_ASK_POLL_INTERVAL",
+    "WRENAI_ASK_POLL_TIMEOUT"
+  ],
+  "env_shared": [
+    "GOOGLE_API_KEY",
+    "COSTAFF_AGENT_MODEL_PROVIDER",
+    "LITELLM_MODEL_NAME",
+    "LITELLM_API_BASE",
+    "LITELLM_API_KEY"
+  ],
+  "env_auto": [],
+  "model_env_var": "WRENAI_AGENT_MODEL",
+  "health_path": "/.well-known/agent-card.json",
+  "mcp_configurable": false
+}

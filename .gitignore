@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+
+# Test caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Local data dumps
+*.sqlite
+*.sqlite3
+data/
+shared/

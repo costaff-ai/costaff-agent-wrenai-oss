@@ -236,9 +236,12 @@ def wrenai_health() -> dict:
     h = wai.health()
     out["wren_ai_service"] = h.get("status") or h.get("error") or "unknown"
     s = wai.semantics_status()
-    if "error" in s:
-        # 404 here just means qdrant has never seen this hash → "missing"
-        msg = str(s.get("error"))
+    # Distinguish our _get() transport error (added when status_code != 200)
+    # from WrenAI's own "error" field on the status payload (always present,
+    # null when prep succeeded). A WrenAI response always has "status";
+    # transport failures don't.
+    if "status" not in s:
+        msg = str(s.get("error") or "unknown transport failure")
         out["semantics_status"] = "missing" if "404" in msg else f"error: {msg}"
     else:
         out["semantics_status"] = s.get("status") or "unknown"

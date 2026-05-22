@@ -25,8 +25,11 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-# Terminal status values seen across WrenAI endpoints.
-TERMINAL = {"finished", "failed", "stopped"}
+# Terminal status values across WrenAI endpoints. Different endpoints use
+# different vocabulary: /v1/asks ends in 'finished'; /v1/sql-answers ends in
+# 'succeeded'; both can also end in 'failed' / 'stopped'. Charts use
+# 'fetching' as a non-terminal mid-state. Union of every terminal token.
+TERMINAL = {"finished", "succeeded", "failed", "stopped"}
 
 
 def _cfg() -> Dict[str, Any]:

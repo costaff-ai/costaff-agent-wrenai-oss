@@ -57,7 +57,7 @@ def wrenai_ask(
     """
     try:
         out = wai.ask_full(question, histories=histories)
-        if "error" in out:
+        if out.get("error"):
             return out
         # Slim down the response — the manager doesn't need internal trace_id etc.
         return {
@@ -105,7 +105,7 @@ def wrenai_explain_result(
     """
     try:
         out = wai.sql_answer_full(question, sql, sql_data, custom_instruction)
-        if "error" in out:
+        if out.get("error"):
             return out
         return {
             "status": out.get("status"),
@@ -136,7 +136,7 @@ def wrenai_make_chart(
     """
     try:
         out = wai.chart_full(question, sql, sql_data)
-        if "error" in out:
+        if out.get("error"):
             return out
         return {
             "status": out.get("status"),
@@ -246,7 +246,9 @@ def wrenai_answer(question: str, with_chart: bool = False) -> dict:
     # Step 3: explain
     sql_data = wui.to_sql_data(executed)
     explained = wai.sql_answer_full(question, sql, sql_data)
-    if "error" in explained:
+    # WrenAI status payloads always carry "error": null on success, so
+    # discriminate on the *value* not just key presence.
+    if explained.get("error"):
         # Explain failed but we still have rows — return what we have.
         out["answer"] = None
         out["error"] = f"explain failed: {explained['error']}"
@@ -256,7 +258,7 @@ def wrenai_answer(question: str, with_chart: bool = False) -> dict:
     # Step 4 (optional): chart
     if with_chart:
         charted = wai.chart_full(question, sql, sql_data)
-        if "error" in charted:
+        if charted.get("error"):
             out["chart"] = None
             # Don't overwrite a prior error from explain — append.
             chart_err = f"chart failed: {charted['error']}"

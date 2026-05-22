@@ -289,6 +289,86 @@ def add_instruction(text: str, *, questions: Optional[List[str]] = None,
     return _post("/v1/instructions", body)
 
 
+# --------------------------------------------- /v1/question-recommendations
+
+
+def question_recommendation_kickoff(*, max_questions: int = 5,
+                                     max_categories: int = 3,
+                                     language: Optional[str] = None) -> dict:
+    """POST /v1/question-recommendations. Returns {"event_id": "..."}."""
+    cfg = _cfg()
+    body: Dict[str, Any] = {
+        "project_id": cfg["project_id"] or None,
+        "mdl_hash": cfg["mdl_hash"] or None,
+        "max_questions": max_questions,
+        "max_categories": max_categories,
+    }
+    if language:
+        body["configuration"] = {"language": language}
+    return _post("/v1/question-recommendations", body)
+
+
+def question_recommendation_result(event_id: str) -> dict:
+    return _get(f"/v1/question-recommendations/{event_id}")
+
+
+def question_recommendation_full(*, max_questions: int = 5,
+                                  max_categories: int = 3,
+                                  language: Optional[str] = None) -> dict:
+    """POST + poll. Returns the final result dict with `questions`."""
+    started = question_recommendation_kickoff(
+        max_questions=max_questions,
+        max_categories=max_categories,
+        language=language,
+    )
+    if "error" in started:
+        return started
+    eid = started.get("event_id") or started.get("query_id")
+    if not eid:
+        return {"error": f"question_recommendation kickoff returned no event_id: {started}"}
+    final = _poll(f"/v1/question-recommendations/{eid}",
+                  expect_id_key="event_id", job_id=eid)
+    final.setdefault("event_id", eid)
+    return final
+
+
+# ---------------------------------------------------- /v1/sql-corrections
+
+
+def sql_correction_kickoff(sqls: List[Dict[str, str]]) -> dict:
+    """POST /v1/sql-corrections.
+
+    Args:
+        sqls: list of `{"sql": "...", "error": "..."}` objects. The
+            `error` field carries the engine's complaint about why the
+            original SQL is bad (column not found / type mismatch / etc.).
+    """
+    cfg = _cfg()
+    body: Dict[str, Any] = {
+        "project_id": cfg["project_id"] or None,
+        "mdl_hash": cfg["mdl_hash"] or None,
+        "sqls": sqls,
+    }
+    return _post("/v1/sql-corrections", body)
+
+
+def sql_correction_result(query_id: str) -> dict:
+    return _get(f"/v1/sql-corrections/{query_id}")
+
+
+def sql_correction_full(sqls: List[Dict[str, str]]) -> dict:
+    """POST + poll. Returns the final result dict with corrected SQLs."""
+    started = sql_correction_kickoff(sqls)
+    if "error" in started:
+        return started
+    qid = started.get("query_id") or started.get("event_id")
+    if not qid:
+        return {"error": f"sql_correction kickoff returned no query_id: {started}"}
+    final = _poll(f"/v1/sql-corrections/{qid}", job_id=qid)
+    final.setdefault("query_id", qid)
+    return final
+
+
 # -------------------------------------------------- semantics preparation
 
 

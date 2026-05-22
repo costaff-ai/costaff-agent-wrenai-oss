@@ -234,11 +234,29 @@ def wrenai_answer(question: str, with_chart: bool = False) -> dict:
     out["retrieved_tables"] = asked.get("retrieved_tables") or []
     out["sql_generation_reasoning"] = asked.get("sql_generation_reasoning")
 
-    # Step 2: execute
+    # Step 2: execute. If the engine rejects the SQL, give WrenAI ONE shot
+    # at fixing it (via /v1/sql-corrections) and retry. Single retry only —
+    # repeated correction loops are usually a sign the MDL is wrong, not
+    # the SQL.
     executed = wui.preview_sql(sql)
     if "error" in executed:
-        out["error"] = f"execute failed: {executed['error']}"
-        return out
+        corr = wai.sql_correction_full([{"sql": sql, "error": str(executed["error"])}])
+        corrected_sql = None
+        if not corr.get("error"):
+            resp = corr.get("response") or corr.get("sqls") or []
+            if isinstance(resp, list) and resp and isinstance(resp[0], dict):
+                corrected_sql = resp[0].get("sql") or resp[0].get("corrected_sql")
+        if corrected_sql and corrected_sql.strip() != sql.strip():
+            retried = wui.preview_sql(corrected_sql)
+            if "error" not in retried:
+                out["sql_correction_applied"] = True
+                out["sql_before_correction"] = sql
+                sql = corrected_sql
+                out["sql"] = sql
+                executed = retried
+        if "error" in executed:
+            out["error"] = f"execute failed (after correction attempt): {executed['error']}"
+            return out
     out["columns"] = executed["columns"]
     out["rows"] = executed["rows"]
     out["row_count"] = executed["row_count"]
@@ -274,6 +292,120 @@ def wrenai_answer(question: str, with_chart: bool = False) -> dict:
 
 
 # ---------------------------------------------------------- knowledge tools
+
+
+def wrenai_recommend_questions(
+    max_questions: int = 5,
+    max_categories: int = 3,
+    language: Optional[str] = None,
+) -> dict:
+    """Ask WrenAI to suggest natural-language questions worth asking of this MDL.
+
+    Onboarding helper: given the deployed semantic model, WrenAI looks
+    at the tables / columns / relationships and proposes example
+    questions a non-technical user could plausibly ask. Useful as the
+    first call when a new analyst opens the dashboard — they pick a
+    suggested question and immediately get an answer via `wrenai_answer`.
+
+    Args:
+        max_questions: cap on the total suggestions returned (default 5).
+        max_categories: group the suggestions into this many topic
+            buckets (e.g. "revenue", "customers", "shipping"). Default 3.
+        language: target language for the suggested questions, e.g.
+            "English", "Traditional Chinese". Defaults to whatever
+            WrenAI's project-level default is.
+
+    Returns:
+        {
+          "status": "finished" | "failed",
+          "questions": [
+             {"question": str, "category": str, "sql": str | None,
+              "explanation": str | None}, ...
+          ],
+          "error": str | None,
+        }
+    """
+    try:
+        out = wai.question_recommendation_full(
+            max_questions=max_questions,
+            max_categories=max_categories,
+            language=language,
+        )
+        if out.get("error"):
+            return out
+        return {
+            "status": out.get("status"),
+            "questions": (
+                (out.get("response") or {}).get("questions")
+                or out.get("questions")
+                or []
+            ),
+            "error": out.get("error"),
+            "event_id": out.get("event_id"),
+        }
+    except Exception as e:
+        logger.warning(f"[wrenai] wrenai_recommend_questions failed: {e}")
+        return {"error": f"{type(e).__name__}: {e}"}
+
+
+def wrenai_correct_sql(sql: str, error_message: str) -> dict:
+    """Repair broken SQL using WrenAI's correction endpoint.
+
+    Use when a SQL produced by `wrenai_ask` (or hand-written) fails
+    against the engine and the engine returned a concrete error message
+    (e.g. "column orders.unknown_col does not exist", "syntax error
+    near LIMIT"). WrenAI reads the schema + original SQL + error and
+    proposes a corrected SQL.
+
+    Use this as a retry path BEFORE giving up on a user's question.
+    Typical chain:
+      1. `wrenai_ask(question)` -> SQL
+      2. `wrenai_execute_sql(sql)` -> error
+      3. `wrenai_correct_sql(sql, error)` -> fixed SQL
+      4. `wrenai_execute_sql(fixed_sql)` -> rows
+
+    `wrenai_answer` already wires this in as an automatic retry — call
+    this tool directly only when you want the corrected SQL string
+    without running it.
+
+    Args:
+        sql: The original (failing) SQL.
+        error_message: The engine's error message verbatim.
+
+    Returns:
+        {
+          "status": "finished" | "failed",
+          "corrected_sql": str | None,
+          "reasoning": str | None,
+          "error": str | None,
+        }
+    """
+    try:
+        out = wai.sql_correction_full([{"sql": sql, "error": error_message}])
+        if out.get("error"):
+            return out
+        # The correction result can shape into a few variants across versions.
+        # Look for the first corrected SQL candidate.
+        corrected = None
+        reasoning = None
+        resp = out.get("response") or out.get("sqls") or []
+        if isinstance(resp, list) and resp:
+            first = resp[0]
+            if isinstance(first, dict):
+                corrected = first.get("sql") or first.get("corrected_sql")
+                reasoning = first.get("reasoning") or first.get("explanation")
+        if corrected is None:
+            corrected = out.get("corrected_sql")
+        return {
+            "status": out.get("status"),
+            "corrected_sql": corrected,
+            "reasoning": reasoning,
+            "error": out.get("error"),
+            "query_id": out.get("query_id"),
+        }
+    except Exception as e:
+        logger.warning(f"[wrenai] wrenai_correct_sql failed: {e}")
+        return {"error": f"{type(e).__name__}: {e}"}
 
 
 def wrenai_add_sql_pair(question: str, sql: str) -> dict:
@@ -386,11 +518,13 @@ def wrenai_health() -> dict:
 
 def load_wrenai_tools() -> list:
     return [
-        wrenai_answer,        # high-level one-shot — prefer this
+        wrenai_answer,                 # high-level one-shot — prefer this
         wrenai_ask,
         wrenai_execute_sql,
         wrenai_explain_result,
         wrenai_make_chart,
+        wrenai_correct_sql,            # SQL repair via /v1/sql-corrections
+        wrenai_recommend_questions,    # onboarding: "what could I ask?"
         wrenai_add_sql_pair,
         wrenai_add_instruction,
         wrenai_health,

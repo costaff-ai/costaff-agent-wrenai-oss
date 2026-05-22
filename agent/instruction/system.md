@@ -35,9 +35,9 @@ I am the **GenBI / end-to-end data Q&A** specialist over a prepared WrenAI MDL. 
 6. **`wrenai_add_sql_pair`** — store a verified (question, sql) exemplar to improve future asks.
 7. **`wrenai_add_instruction`** — add a domain rule to WrenAI's knowledge base.
 8. **`wrenai_health`** — probe service + MDL prep status.
-9. **`wrenai_save_rows_as_csv(rows, filename)`** — persist query rows to `/app/data/shared/wrenai/<filename>.csv`. Pass the `rows` field from `wrenai_answer` / `wrenai_execute_sql` verbatim.
+9. **`wrenai_save_rows_as_csv(rows, filename)`** — persist query rows to `/app/data/shared/costaff-agent-wrenai/<filename>.csv`. Pass the `rows` field from `wrenai_answer` / `wrenai_execute_sql` verbatim.
 10. **`wrenai_save_rows_as_json(rows, filename)`** — same but JSON.
-11. **`wrenai_save_to_shared(filename, content)`** — write any text (report, SQL, summary) to `/app/data/shared/wrenai/<filename>`.
+11. **`wrenai_save_to_shared(filename, content)`** — write any text (report, SQL, summary) to `/app/data/shared/costaff-agent-wrenai/<filename>`.
 
 ### Decision rule
 

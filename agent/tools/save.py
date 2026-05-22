@@ -8,7 +8,13 @@ shape — moving an intermediate copy would just add a step the LLM has
 to chain correctly.
 
 Path safety: filename must be a bare name matching [A-Za-z0-9._-]+, no
-slashes, no `..`. All writes go under /app/data/shared/wrenai/.
+slashes, no `..`. All writes go under /app/data/shared/costaff-agent-wrenai/.
+
+Why the folder is `costaff-agent-wrenai` and not the bare `wrenai`: it
+matches the container-name prefix the Manager already uses when
+prescribing downstream paths (e.g. business_analysis reads from
+/app/data/shared/costaff-agent-wrenai/...). Keeping the name consistent
+avoids the LLM having to chain a `mv` to bridge the gap.
 """
 from __future__ import annotations
 
@@ -19,7 +25,7 @@ import re
 from pathlib import Path
 from typing import Any, Dict, List
 
-_SHARED_ROOT = Path("/app/data/shared/wrenai")
+_SHARED_ROOT = Path("/app/data/shared/costaff-agent-wrenai")
 _SAFE_NAME = re.compile(r"^[A-Za-z0-9._-]+$")
 
 
@@ -47,7 +53,7 @@ def _write(filename: str, text: str, append: bool) -> dict:
 
 
 def wrenai_save_to_shared(filename: str, content: str, append: bool = False) -> dict:
-    """Save text content to /app/data/shared/wrenai/<filename>.
+    """Save text content to /app/data/shared/costaff-agent-wrenai/<filename>.
 
     Use after wrenai_answer / wrenai_execute_sql when the user wants
     the result persisted as a report, SQL file, or pre-formatted text.
@@ -66,7 +72,7 @@ def wrenai_save_to_shared(filename: str, content: str, append: bool = False) -> 
 
 
 def wrenai_save_rows_as_csv(rows: List[Dict[str, Any]], filename: str) -> dict:
-    """Save query rows to /app/data/shared/wrenai/<filename> as CSV.
+    """Save query rows to /app/data/shared/costaff-agent-wrenai/<filename> as CSV.
 
     Uses csv.DictWriter so commas / quotes / newlines inside cells are
     handled correctly — do NOT hand-format CSV in the prompt. Columns
@@ -99,7 +105,7 @@ def wrenai_save_rows_as_csv(rows: List[Dict[str, Any]], filename: str) -> dict:
 
 
 def wrenai_save_rows_as_json(rows: List[Dict[str, Any]], filename: str, indent: int = 2) -> dict:
-    """Save query rows to /app/data/shared/wrenai/<filename> as JSON.
+    """Save query rows to /app/data/shared/costaff-agent-wrenai/<filename> as JSON.
 
     Args:
         rows: list of dicts.

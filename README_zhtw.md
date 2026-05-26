@@ -73,7 +73,7 @@ end-to-end 一個資料問題，manager 通常只要呼叫 **`wrenai_answer(ques
 ### 透過 CoStaff CLI（建議）
 
 ```bash
-costaff agent add wrenai --github https://github.com/costaff-ai/costaff-agent-wrenai
+costaff agent add wrenai --github https://github.com/costaff-ai/costaff-agent-wrenai-oss
 # CLI 會提示輸入：GOOGLE_API_KEY, WRENAI_BASE_URL, WRENAI_UI_GRAPHQL_URL,
 #                WRENAI_PROJECT_ID, WRENAI_MDL_HASH
 ```
@@ -81,8 +81,8 @@ costaff agent add wrenai --github https://github.com/costaff-ai/costaff-agent-wr
 ### 獨立 Docker Compose
 
 ```bash
-git clone https://github.com/costaff-ai/costaff-agent-wrenai
-cd costaff-agent-wrenai
+git clone https://github.com/costaff-ai/costaff-agent-wrenai-oss
+cd costaff-agent-wrenai-oss
 
 cat > .env <<EOF
 GOOGLE_API_KEY=...

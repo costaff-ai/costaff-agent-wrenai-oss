@@ -74,7 +74,7 @@ For granular control the lower-level tools can be chained explicitly:
 ### Deploy via CoStaff CLI (recommended)
 
 ```bash
-costaff agent add wrenai --github https://github.com/costaff-ai/costaff-agent-wrenai
+costaff agent add wrenai --github https://github.com/costaff-ai/costaff-agent-wrenai-oss
 # CLI prompts for: GOOGLE_API_KEY, WRENAI_BASE_URL, WRENAI_UI_GRAPHQL_URL,
 #                  WRENAI_PROJECT_ID, WRENAI_MDL_HASH
 ```
@@ -82,8 +82,8 @@ costaff agent add wrenai --github https://github.com/costaff-ai/costaff-agent-wr
 ### Standalone Docker Compose
 
 ```bash
-git clone https://github.com/costaff-ai/costaff-agent-wrenai
-cd costaff-agent-wrenai
+git clone https://github.com/costaff-ai/costaff-agent-wrenai-oss
+cd costaff-agent-wrenai-oss
 
 cat > .env <<EOF
 GOOGLE_API_KEY=...

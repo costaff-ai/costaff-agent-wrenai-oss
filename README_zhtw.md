@@ -15,18 +15,26 @@
 
 | 工具 | 用途 |
 |---|---|
-| `wrenai_ask(question)` | 把自然語言問題翻成 SQL，回傳推理與 retrieved tables |
-| `wrenai_explain_result(question, sql, sql_data)` | 給定問題、SQL、執行後的列，產生自然語言回答 |
-| `wrenai_make_chart(question, sql, sql_data)` | 給定同樣輸入，產生 Vega-Lite v5 圖表規格 |
-| `wrenai_add_sql_pair(question, sql)` | 把驗證過的 (問題, SQL) 對寫入 WrenAI 的 qdrant 索引當 few-shot 範例 |
-| `wrenai_add_instruction(text, questions, is_default)` | 把領域規則加入 WrenAI knowledge base |
-| `wrenai_health()` | 探測 `/health` 與 MDL prep 狀態 |
+| **`wrenai_answer(question, with_chart?)`** | **一鍵端到端。** 內部跑 ask → 透過 wren-ui GraphQL 執行 → 自然語言回答（+ 選擇性圖表）。引擎拒絕 SQL 時會自動透過 `/v1/sql-corrections` 重試一次。任何「回答我的資料問題」需求都優先用這個。 |
+| `wrenai_ask(question)` | 只產 SQL，不執行。 |
+| `wrenai_execute_sql(sql, limit?)` | 透過 wren-ui 的 `previewSql` GraphQL mutation 執行 SQL，回傳列。 |
+| `wrenai_explain_result(question, sql, sql_data)` | 給定 (問題, SQL, 列) 三元組，產生自然語言回答。 |
+| `wrenai_make_chart(question, sql, sql_data)` | 同樣三元組 → Vega-Lite v5 圖表規格。 |
+| `wrenai_correct_sql(question, sql, error)` | 透過 `/v1/sql-corrections` 修復失敗的 SQL。 |
+| `wrenai_recommend_questions()` | 上手用 ——「我可以問這個 MDL 什麼問題？」 |
+| `wrenai_add_sql_pair(question, sql)` | 把驗證過的 (問題, SQL) 對寫入 WrenAI 的 qdrant 索引當 few-shot 範例。 |
+| `wrenai_add_instruction(text, questions, is_default)` | 把領域規則加入 WrenAI knowledge base。 |
+| `wrenai_health()` | 探測 `/health` 與設定的 MDL hash 的 `semantics-preparations` 狀態。 |
+| `wrenai_save_rows_as_csv(rows, filename)` | 把查詢結果落地成 `/app/data/shared/costaff-agent-wrenai/<filename>.csv`。 |
+| `wrenai_save_rows_as_json(rows, filename, indent?)` | 同上，但是 JSON。 |
+| `wrenai_save_to_shared(filename, content, append?)` | 寫任意文字內容到共享 workspace。 |
 
 ## 它不做什麼（刻意設計）
 
-- **不執行 SQL。** Agent 只產 SQL；由 caller（通常是 `database-agent`）執行後，把列傳回來給 `wrenai_explain_result` / `wrenai_make_chart`。生成與執行分離，職責乾淨，也不用內嵌 DB driver。
+- **不連線任意外部資料庫。** SQL 執行只走 wren-ui 的 `previewSql`，打在 project 設定的 MDL 之上 —— 要操作 WrenAI 之外的原始 DB，請用 `database-agent`。
 - **不管 MDL prep。** Agent 不會打 `POST /v1/semantics-preparations` —— 那是 operator 在 wren-ui 部署時做的。Agent 只透過 `wrenai_health` 檢查狀態。
 - **不能 runtime 切換 MDL。** 一個 agent 實例服務一個 schema。要另一個 schema，部署另一個實例，給不同 env。
+- **不回傳無上限的結果集。** 列數會被 `WRENAI_EXEC_ROW_LIMIT`（預設 1000）截斷，保護下游 LLM context。
 
 ---
 
@@ -35,21 +43,22 @@
 ```
 CoStaff Manager
      │
-     │  A2A Protocol
+     │  A2A Protocol (/.well-known/agent-card.json)
      ▼
-WrenAI Agent (本 repo)         ── httpx ──▶  wren-ai-service:5555
-                                                 (自架 OSS WrenAI)
-     │
-     │  AgentTool dispatch
-     ▼
-database_agent                                  (執行 SQL)
+WrenAI Agent (本 repo)  ── httpx ──▶  wren-ai-service:5555    (ask / corrections / charts / KB 寫入)
+                        └─ GraphQL ─▶  wren-ui:3000/api/graphql  (previewSql → 對 project DB 執行)
 ```
 
-end-to-end 一個問題的流程：
+**自給自足 —— caller 不需要在鏈中額外掛一個 database agent。** SQL 執行委派給 wren-ui 的 `previewSql` GraphQL mutation，由它去打 project 設定的資料來源。
 
-1. Manager 呼叫本 agent 的 `wrenai_ask` 拿 SQL。
-2. Manager 呼叫 `database_agent` 執行 SQL，拿到列。
-3. Manager 帶 `(question, sql, rows)` 再回來呼叫 `wrenai_explain_result` / `wrenai_make_chart`。
+end-to-end 一個資料問題，manager 通常只要呼叫 **`wrenai_answer(question)`** —— 內部會跑 ask → execute → explain（+ 選擇性 chart），引擎拒絕 SQL 時自動透過 `/v1/sql-corrections` 重試一次。
+
+需要更細控制時，可以拆開呼叫底層工具：
+
+1. `wrenai_ask(question)` → SQL。
+2. `wrenai_execute_sql(sql)` → 列（透過 wren-ui）。
+3. `wrenai_explain_result(question, sql, rows)` 與 / 或 `wrenai_make_chart(question, sql, rows)`。
+4. 失敗時：`wrenai_correct_sql(question, sql, error)` → 修好的 SQL → 重新執行。
 
 ---
 
@@ -65,7 +74,8 @@ end-to-end 一個問題的流程：
 
 ```bash
 costaff agent add wrenai --github https://github.com/costaff-ai/costaff-agent-wrenai
-# CLI 會提示輸入：GOOGLE_API_KEY, WRENAI_BASE_URL, WRENAI_PROJECT_ID, WRENAI_MDL_HASH
+# CLI 會提示輸入：GOOGLE_API_KEY, WRENAI_BASE_URL, WRENAI_UI_GRAPHQL_URL,
+#                WRENAI_PROJECT_ID, WRENAI_MDL_HASH
 ```
 
 ### 獨立 Docker Compose
@@ -77,6 +87,7 @@ cd costaff-agent-wrenai
 cat > .env <<EOF
 GOOGLE_API_KEY=...
 WRENAI_BASE_URL=http://10.128.0.2:5555
+WRENAI_UI_GRAPHQL_URL=http://10.128.0.2:13000/api/graphql
 WRENAI_PROJECT_ID=1
 WRENAI_MDL_HASH=f91a37d52b86f0e302421d752955d7a41f7509d1
 EOF
@@ -93,12 +104,14 @@ Agent 監聽 `http://localhost:8081`。A2A 探索端點 `/.well-known/agent-card
 | 變數 | 必填 | 預設 | 說明 |
 |---|---|---|---|
 | `GOOGLE_API_KEY` | 是（gemini） | — | Orchestrator 的 LLM key |
-| `WRENAI_BASE_URL` | 是 | — | 例如 `http://10.128.0.2:5555` 或 `https://wren.example.com` |
+| `WRENAI_BASE_URL` | 是 | — | wren-ai-service URL，例如 `http://10.128.0.2:5555` |
+| `WRENAI_UI_GRAPHQL_URL` | 是 | — | wren-ui 的 GraphQL URL（SQL 執行用），例如 `http://10.128.0.2:13000/api/graphql` |
 | `WRENAI_PROJECT_ID` | 是 | — | wren-ui `project` 表的整數 id，如 `"1"` |
 | `WRENAI_MDL_HASH` | 是 | — | wren-ui `deploy_log.hash` 的 40 字元 hex |
 | `WRENAI_TIMEOUT` | 否 | `30` | 單次 HTTP timeout（秒） |
 | `WRENAI_ASK_POLL_INTERVAL` | 否 | `2` | 非同步 job 的 poll 間隔 |
 | `WRENAI_ASK_POLL_TIMEOUT` | 否 | `120` | 非同步 job 的最大總等待時間 |
+| `WRENAI_EXEC_ROW_LIMIT` | 否 | `1000` | `wrenai_execute_sql` 回傳列數上限 |
 | `COSTAFF_AGENT_MODEL_PROVIDER` | 否 | `gemini` | `gemini` 或 `litellm` |
 | `WRENAI_AGENT_MODEL` | 否 | `gemini-3.1-flash-lite-preview` | Orchestrator 用的 LLM（不是 WrenAI 自己內部的 LLM） |
 

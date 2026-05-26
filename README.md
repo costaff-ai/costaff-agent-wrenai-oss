@@ -16,14 +16,19 @@
 
 | Tool | Purpose |
 |---|---|
-| **`wrenai_answer(question, with_chart?)`** | **One-shot end-to-end.** Runs ask → execute via wren-ui GraphQL → natural-language answer (+ optional chart). Prefer this for any "answer my data question" request. |
+| **`wrenai_answer(question, with_chart?)`** | **One-shot end-to-end.** Runs ask → execute via wren-ui GraphQL → natural-language answer (+ optional chart). Auto-retries once via `/v1/sql-corrections` if the engine rejects the generated SQL. Prefer this for any "answer my data question" request. |
 | `wrenai_ask(question)` | SQL generation only (no execution). |
-| `wrenai_execute_sql(sql, limit?)` | Execute a SQL via wren-ui's `previewSql` and return rows. |
+| `wrenai_execute_sql(sql, limit?)` | Execute a SQL via wren-ui's `previewSql` GraphQL mutation and return rows. |
 | `wrenai_explain_result(question, sql, sql_data)` | Given a (question, sql, rows) triple, produce a natural-language answer. |
 | `wrenai_make_chart(question, sql, sql_data)` | Same triple → Vega-Lite v5 chart spec. |
+| `wrenai_correct_sql(question, sql, error)` | Repair a failing SQL via `/v1/sql-corrections`. |
+| `wrenai_recommend_questions()` | Onboarding helper — "what could I ask about this MDL?". |
 | `wrenai_add_sql_pair(question, sql)` | Store a verified (question, SQL) pair as a few-shot exemplar in WrenAI's qdrant index. |
 | `wrenai_add_instruction(text, questions, is_default)` | Add a domain rule to WrenAI's knowledge base. |
 | `wrenai_health()` | Probe `/health` + check `semantics-preparations` status for the configured MDL hash. |
+| `wrenai_save_rows_as_csv(rows, filename)` | Persist query rows to `/app/data/shared/costaff-agent-wrenai/<filename>.csv`. |
+| `wrenai_save_rows_as_json(rows, filename, indent?)` | Same, as JSON. |
+| `wrenai_save_to_shared(filename, content, append?)` | Write arbitrary text content to the shared workspace. |
 
 ## What it does NOT do (by design)
 
@@ -41,19 +46,20 @@ CoStaff Manager
      │
      │  A2A Protocol (/.well-known/agent-card.json)
      ▼
-WrenAI Agent (this)              ── httpx ──▶  wren-ai-service:5555
-                                                 (self-hosted OSS WrenAI)
-     │
-     │  AgentTool dispatch
-     ▼
-database_agent                                  (executes the SQL)
+WrenAI Agent (this)  ── httpx ──▶  wren-ai-service:5555    (ask / corrections / charts / KB writes)
+                     └─ GraphQL ─▶  wren-ui:3000/api/graphql  (previewSql → execute against project DB)
 ```
 
-For each end-to-end question the manager typically:
+**Self-contained — the caller does NOT need a separate database agent in the chain.** SQL execution is delegated to wren-ui's `previewSql` GraphQL mutation, which runs the query against the project's configured data source.
 
-1. Calls `wrenai_ask` here to get SQL.
-2. Calls `database_agent` to execute that SQL and return rows.
-3. Calls `wrenai_explain_result` / `wrenai_make_chart` here with `(question, sql, rows)` to get the natural-language answer and / or chart spec.
+For an end-to-end data question, the manager normally just calls **`wrenai_answer(question)`** — it internally runs ask → execute → explain (+ optional chart), and auto-retries once via `/v1/sql-corrections` if the engine rejects the SQL.
+
+For granular control the lower-level tools can be chained explicitly:
+
+1. `wrenai_ask(question)` → SQL.
+2. `wrenai_execute_sql(sql)` → rows (via wren-ui).
+3. `wrenai_explain_result(question, sql, rows)` and/or `wrenai_make_chart(question, sql, rows)`.
+4. On failure: `wrenai_correct_sql(question, sql, error)` → fixed SQL → re-execute.
 
 ---
 
@@ -69,7 +75,8 @@ For each end-to-end question the manager typically:
 
 ```bash
 costaff agent add wrenai --github https://github.com/costaff-ai/costaff-agent-wrenai
-# CLI prompts for: GOOGLE_API_KEY, WRENAI_BASE_URL, WRENAI_PROJECT_ID, WRENAI_MDL_HASH
+# CLI prompts for: GOOGLE_API_KEY, WRENAI_BASE_URL, WRENAI_UI_GRAPHQL_URL,
+#                  WRENAI_PROJECT_ID, WRENAI_MDL_HASH
 ```
 
 ### Standalone Docker Compose
@@ -81,6 +88,7 @@ cd costaff-agent-wrenai
 cat > .env <<EOF
 GOOGLE_API_KEY=...
 WRENAI_BASE_URL=http://10.128.0.2:5555
+WRENAI_UI_GRAPHQL_URL=http://10.128.0.2:13000/api/graphql
 WRENAI_PROJECT_ID=1
 WRENAI_MDL_HASH=f91a37d52b86f0e302421d752955d7a41f7509d1
 EOF

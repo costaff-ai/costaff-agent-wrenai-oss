@@ -69,7 +69,7 @@ For granular control the lower-level tools can be chained explicitly:
 
 - A self-hosted WrenAI OSS deployment reachable from this agent's network (typical port: 5555).
 - The MDL must already be prepared on the AI service via `POST /v1/semantics-preparations` (wren-ui does this when you deploy a project).
-- A Google Gemini API key (default model `gemini-3.1-flash-lite-preview`) or a LiteLLM-compatible provider.
+- A Google Gemini API key (default model `gemini-3.1-flash-lite`) or a LiteLLM-compatible provider.
 
 ### Deploy via CoStaff CLI (recommended)
 
@@ -114,7 +114,7 @@ Agent listens on `http://localhost:8081`. A2A discovery endpoint: `/.well-known/
 | `WRENAI_ASK_POLL_TIMEOUT` | no | `120` | Max total wait for an async job |
 | `WRENAI_EXEC_ROW_LIMIT` | no | `1000` | Hard cap on rows returned from `wrenai_execute_sql` |
 | `COSTAFF_AGENT_MODEL_PROVIDER` | no | `gemini` | `gemini` or `litellm` |
-| `WRENAI_AGENT_MODEL` | no | `gemini-3.1-flash-lite-preview` | LLM for the orchestrator (not WrenAI's own LLM) |
+| `WRENAI_AGENT_MODEL` | no | `gemini-3.1-flash-lite` | LLM for the orchestrator (not WrenAI's own LLM) |
 
 The LLM used by WrenAI itself for SQL generation is configured inside WrenAI's deployment, not here.
 

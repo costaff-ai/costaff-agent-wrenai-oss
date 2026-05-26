@@ -68,7 +68,7 @@ end-to-end 一個資料問題，manager 通常只要呼叫 **`wrenai_answer(ques
 
 - 自架的 WrenAI OSS（agent 網路上要連得到，預設 port 5555）。
 - MDL 已經在 AI service 上 prep 過（wren-ui 部署 project 時會自動觸發 `POST /v1/semantics-preparations`）。
-- Google Gemini API key（預設 model `gemini-3.1-flash-lite-preview`），或 LiteLLM 相容 provider。
+- Google Gemini API key（預設 model `gemini-3.1-flash-lite`），或 LiteLLM 相容 provider。
 
 ### 透過 CoStaff CLI（建議）
 
@@ -113,7 +113,7 @@ Agent 監聽 `http://localhost:8081`。A2A 探索端點 `/.well-known/agent-card
 | `WRENAI_ASK_POLL_TIMEOUT` | 否 | `120` | 非同步 job 的最大總等待時間 |
 | `WRENAI_EXEC_ROW_LIMIT` | 否 | `1000` | `wrenai_execute_sql` 回傳列數上限 |
 | `COSTAFF_AGENT_MODEL_PROVIDER` | 否 | `gemini` | `gemini` 或 `litellm` |
-| `WRENAI_AGENT_MODEL` | 否 | `gemini-3.1-flash-lite-preview` | Orchestrator 用的 LLM（不是 WrenAI 自己內部的 LLM） |
+| `WRENAI_AGENT_MODEL` | 否 | `gemini-3.1-flash-lite` | Orchestrator 用的 LLM（不是 WrenAI 自己內部的 LLM） |
 
 WrenAI 自己產 SQL 時用的 LLM 是在 WrenAI 部署裡設定的，不在這裡。
 

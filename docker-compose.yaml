@@ -12,7 +12,7 @@ services:
       - COSTAFF_SHARED_DIR_WRENAI=/app/data/shared/costaff-agent-wrenai
       - AGENT_WORKSPACE_DIR_WRENAI=/app/data
       - COSTAFF_AGENT_MODEL_PROVIDER=${COSTAFF_AGENT_MODEL_PROVIDER:-gemini}
-      - WRENAI_AGENT_MODEL=${WRENAI_AGENT_MODEL:-gemini-3.1-flash-lite-preview}
+      - WRENAI_AGENT_MODEL=${WRENAI_AGENT_MODEL:-gemini-3.1-flash-lite}
       - GOOGLE_API_KEY=${GOOGLE_API_KEY}
       - LITELLM_MODEL_NAME=${LITELLM_MODEL_NAME:-}
       - LITELLM_API_BASE=${LITELLM_API_BASE:-}

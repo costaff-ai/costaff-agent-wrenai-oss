@@ -1,4 +1,4 @@
-google-adk[a2a,extensions]==2.0.0
+google-adk[a2a,extensions]==2.1.0
 google-cloud-storage>=2.18.2,<3
 mcp>=1.9.4
 uvicorn>=0.30.6
